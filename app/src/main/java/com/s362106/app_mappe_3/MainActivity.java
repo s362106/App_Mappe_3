@@ -1,30 +1,19 @@
 package com.s362106.app_mappe_3;
 
-import androidx.annotation.NonNull;
-import androidx.appcompat.app.AlertDialog;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.app.ActivityCompat;
-
-import android.Manifest;
-import android.content.DialogInterface;
-import android.content.IntentSender;
-import android.content.pm.PackageManager;
 import android.location.Address;
 import android.location.Geocoder;
-import android.os.Bundle;
 import android.os.AsyncTask;
-
-import android.util.Log;
+import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.app.AppCompatActivity;
 
-import com.google.android.gms.common.ConnectionResult;
-import com.google.android.gms.common.api.GoogleApiClient;
-import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.MapFragment;
@@ -32,6 +21,7 @@ import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.MarkerOptions;
+import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.textfield.TextInputEditText;
 
 import org.json.JSONArray;
@@ -39,19 +29,15 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.net.URLEncoder;
 import java.util.List;
 import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity implements OnMapReadyCallback,
-GoogleMap.OnMapClickListener, GoogleMap.OnMarkerClickListener{
+        GoogleMap.OnMapClickListener, GoogleMap.OnMarkerClickListener {
 
     protected GoogleMap mMap;
     private Geocoder geocoder;
@@ -61,14 +47,11 @@ GoogleMap.OnMapClickListener, GoogleMap.OnMarkerClickListener{
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        getJSON task = new getJSON();
-        task.execute(new String[]{"https://dave3600.cs.oslomet.no/~s362106/jsonPlace.php"});
-
         MapFragment mapFragment = (MapFragment) getFragmentManager()
                 .findFragmentById(R.id.map);
 
         mapFragment.getMapAsync(this);
-        geocoder = new Geocoder(MainActivity.this, Locale.getDefault());
+        geocoder = new Geocoder(this, Locale.getDefault());
     }
 
     @Override
@@ -82,21 +65,27 @@ GoogleMap.OnMapClickListener, GoogleMap.OnMarkerClickListener{
     @Override
     protected void onResume() {
         super.onResume();
-        getJSON task = new getJSON();
-        task.execute(new String[]{"https://dave3600.cs.oslomet.no/~s362106/jsonPlace.php"});
+        new getJSON().execute("https://dave3600.cs.oslomet.no/~s362106/jsonPlace.php");
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        mMap.clear();
     }
 
     @Override
     public void onMapClick(LatLng latLng) {
-        View view = LayoutInflater.from(MainActivity.this).inflate(R.layout.dialog, null);
+        View view = LayoutInflater.from(this).inflate(R.layout.bottomsheet_layout, null);
         TextInputEditText titleInput = view.findViewById(R.id.title_input);
         TextInputEditText descriptionInput = view.findViewById(R.id.description_input);
+        Button finishButton = view.findViewById(R.id.createBtn);
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
-        builder.setTitle("New Marker");
-        builder.setView(view);
+        BottomSheetDialog bottomSheetDialog = new BottomSheetDialog(this);
+        bottomSheetDialog.setContentView(view);
+        bottomSheetDialog.show();
 
-        builder.setPositiveButton("Ferdig", (DialogInterface dialog, int which) -> {
+        finishButton.setOnClickListener(v -> {
             String titleString = titleInput.getText().toString();
             String descriptionString = descriptionInput.getText().toString();
             double lat = latLng.latitude;
@@ -115,9 +104,10 @@ GoogleMap.OnMapClickListener, GoogleMap.OnMarkerClickListener{
             }
 
             mMap.moveCamera(CameraUpdateFactory.newLatLng(latLng));
-            new postJSON(titleString, descriptionString, address, lat, lng).execute();
+            bottomSheetDialog.dismiss();
+
+            new PostJSONTask(this).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, titleString, descriptionString, address, String.valueOf(lat), String.valueOf(lng));
         });
-        builder.show();
     }
 
     @Override
@@ -127,7 +117,7 @@ GoogleMap.OnMapClickListener, GoogleMap.OnMarkerClickListener{
     }
 
     private void showMarkerDetails(Marker marker) {
-        View detailsView = LayoutInflater.from(MainActivity.this).inflate(R.layout.marker_details_dialog, null);
+        View detailsView = LayoutInflater.from(this).inflate(R.layout.marker_details_dialog, null);
 
         TextView titleView = detailsView.findViewById(R.id.titleView);
         TextView descriptionView = detailsView.findViewById(R.id.descriptionView);
@@ -136,7 +126,7 @@ GoogleMap.OnMapClickListener, GoogleMap.OnMarkerClickListener{
 
         JSONObject info = (JSONObject) marker.getTag();
 
-        if(info != null) {
+        if (info != null) {
             try {
                 titleView.setText(info.getString("title"));
                 descriptionView.setText(info.getString("description"));
@@ -144,21 +134,20 @@ GoogleMap.OnMapClickListener, GoogleMap.OnMarkerClickListener{
                 String coordinates = "(" + marker.getPosition().latitude + ", " + marker.getPosition().longitude + ")";
                 coordinateView.setText(coordinates);
 
-                AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
+                AlertDialog.Builder builder = new AlertDialog.Builder(this);
                 builder.setView(detailsView);
 
                 builder.show();
             } catch (JSONException e) {
                 e.printStackTrace();
             }
-
         }
     }
 
     private String getAddress(LatLng latLng) {
         try {
             List<Address> addresses = geocoder.getFromLocation(latLng.latitude, latLng.longitude, 1);
-            if(addresses != null && addresses.size() > 0) {
+            if (addresses != null && addresses.size() > 0) {
                 Address address = addresses.get(0);
                 return address.getAddressLine(0);
             }
@@ -180,7 +169,7 @@ GoogleMap.OnMapClickListener, GoogleMap.OnMarkerClickListener{
                 connection.connect();
 
                 int responseCode = connection.getResponseCode();
-                if(responseCode == HttpURLConnection.HTTP_OK) {
+                if (responseCode == HttpURLConnection.HTTP_OK) {
                     BufferedReader br = new BufferedReader(new InputStreamReader(connection.getInputStream()));
                     String s;
                     while ((s = br.readLine()) != null) {
@@ -221,57 +210,14 @@ GoogleMap.OnMapClickListener, GoogleMap.OnMarkerClickListener{
                         e.printStackTrace();
                     }
 
-                    if(i == 0) {
+                    if (i == 0) {
                         mMap.moveCamera(CameraUpdateFactory.newLatLng(position));
                     }
                 }
             } catch (JSONException e) {
-                Toast.makeText(MainActivity.this, "Error med JSON: " + e, Toast.LENGTH_SHORT).show();
+                Toast.makeText(getApplicationContext(), "Error: " + e, Toast.LENGTH_SHORT).show();
             }
 
-        }
-    }
-
-    private class postJSON extends AsyncTask<Void, Void, String> {
-        private final String tittel;
-        private final String beskrivelse;
-        private final String adresse;
-        private final double latitude;
-        private final double longitude;
-
-        public postJSON(String tittel, String beskrivelse, String adresse, double latitude, double longitude) {
-            this.tittel = tittel;
-            this.beskrivelse = beskrivelse;
-            this.adresse = adresse;
-            this.latitude = latitude;
-            this.longitude = longitude;
-        }
-
-        @Override
-        protected String doInBackground(Void... voids) {
-            try {
-                URL url = new URL("https://dave3600.cs.oslomet.no/~s362106/jsonPI.php");
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setRequestMethod("POST");
-                conn.setDoOutput(true);
-
-                String data = "Title=" + URLEncoder.encode(tittel, "UTF-8") +
-                        "&Description=" + URLEncoder.encode(beskrivelse, "UTF-8") +
-                        "&Address=" + URLEncoder.encode(adresse, "UTF-8") +
-                        "&Latitude=" + latitude + "&Longitude=" + longitude;
-
-                OutputStream outputStream = conn.getOutputStream();
-                BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(outputStream, "UTF-8"));
-                writer.write(data);
-                writer.flush();
-                writer.close();
-                outputStream.close();
-
-                int responseCode = conn.getResponseCode();
-                return String.valueOf(responseCode);
-            } catch (IOException e) {
-                return "Error: " + e.getMessage();
-            }
         }
     }
 }
